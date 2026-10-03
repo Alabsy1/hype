@@ -38,9 +38,7 @@ export default async function Footer() {
               Modern furniture in warm neutrals, drawn at full scale and made in small batches.
             </p>
             <p className="meta mt-6 normal-case tracking-[0.1em]">
-              Studio 4, Rue des Ateliers
-              <br />
-              Lisbon — Copenhagen
+              Hurghada, Egypt
             </p>
           </div>
 
