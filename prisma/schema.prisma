@@ -1,0 +1,291 @@
+// Hype — Phase 04 Database Foundation
+// PostgreSQL / Neon / Prisma ORM 7
+// Models mirror the Phase 03B audited frontend data model.
+// Deferred models (Material, Color, Tag, ProductTag, ProductRelation,
+// Order, Customer, AuditLog, editorial/CMS tables) are intentionally absent.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ------------------------------- Enums -------------------------------
+
+enum ProductStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum Availability {
+  IN_STOCK
+  LOW_STOCK
+  MADE_TO_ORDER
+}
+
+enum UserRole {
+  ADMIN
+  EDITOR
+  STAFF
+  // Phase 10: public customer accounts. Added because ADMIN/EDITOR/STAFF
+  // form an internal staff hierarchy — representing customers as STAFF would
+  // grant them every future staff-gated capability by accident.
+  CUSTOMER
+}
+
+// ----------------------------- Department ----------------------------
+
+// Top-level catalog namespace: furniture | decoration.
+model Department {
+  id        String     @id @default(cuid())
+  slug      String     @unique
+  name      String
+  isVisible Boolean    @default(true)
+  order     Int        @default(0)
+  categories Category[]
+  products  Product[]
+
+  @@map("Department")
+}
+
+// ------------------------------ Category -----------------------------
+
+// Belongs to exactly one department. Slug uniqueness is department-scoped
+// (furniture and decoration keep separate route namespaces).
+model Category {
+  id           String       @id @default(cuid())
+  departmentId String
+  slug         String
+  name         String
+  tagline      String?
+  description  String?
+  imageId      String?
+  order        Int          @default(0)
+  isVisible    Boolean      @default(true)
+  department   Department   @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  image        MediaAsset?  @relation("CategoryImage", fields: [imageId], references: [id], onDelete: SetNull)
+  products     Product[]
+
+  @@unique([departmentId, slug])
+  @@index([departmentId, isVisible, order])
+  @@map("Category")
+}
+
+// -------------------------- ComparisonGroup --------------------------
+
+// Independent from Category. Drives compare-page group membership and the
+// derived "related products" logic. Distinct from a category even when the
+// current static slugs coincide (decoration: cushions-throws vs textiles).
+model ComparisonGroup {
+  id       String    @id @default(cuid())
+  slug     String    @unique
+  name     String
+  order    Int       @default(0)
+  products Product[]
+
+  @@map("ComparisonGroup")
+}
+
+// ------------------------------ Product ------------------------------
+
+// Central catalog model. Price is stored as integer cents. The public site
+// will later query status = PUBLISHED only.
+model Product {
+  id                 String          @id @default(cuid())
+  slug               String          @unique
+  name               String
+  priceCents         Int
+  compareAtPriceCents Int?
+  shortDescription   String
+  description        String
+  departmentId       String
+  categoryId         String
+  comparisonGroupId  String
+  material           String
+  materials          String[]        @default([])
+  color              String
+  colorFamily        String?
+  availability       Availability
+  dimensions         Json
+  features           String[]        @default([])
+  tags               String[]        @default([])
+  isFeatured         Boolean         @default(false)
+  isBestseller       Boolean         @default(false)
+  isNewArrival       Boolean         @default(false)
+  status             ProductStatus   @default(DRAFT)
+  publishedAt        DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  department         Department      @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  category           Category        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  comparisonGroup    ComparisonGroup @relation(fields: [comparisonGroupId], references: [id], onDelete: Restrict)
+  images             ProductImage[]
+  alternatives       ProductAlternative[] @relation("ProductAlternatives")
+  alternativeOf      ProductAlternative[] @relation("AlternativeProducts")
+  collections        CollectionProduct[]
+
+  @@index([departmentId])
+  @@index([categoryId])
+  @@index([comparisonGroupId])
+  @@index([status])
+  @@index([departmentId, categoryId])
+  @@index([status, departmentId])
+  @@index([priceCents])
+  @@index([isFeatured])
+  @@index([isBestseller])
+  @@index([isNewArrival])
+  @@map("Product")
+}
+
+// ---------------------------- ProductImage ---------------------------
+
+// Ordered images per product. Position 0 is the primary image.
+model ProductImage {
+  id           String      @id @default(cuid())
+  productId    String
+  mediaAssetId String
+  position     Int
+  altText      String?
+  product      Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  mediaAsset   MediaAsset  @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)
+
+  @@unique([productId, position])
+  @@index([mediaAssetId])
+  @@map("ProductImage")
+}
+
+// ---------------------------- MediaAsset -----------------------------
+
+// Metadata only — never stores binary data. Local public/images urls keep
+// working unchanged; external object storage is a later-phase concern.
+model MediaAsset {
+  id            String        @id @default(cuid())
+  storageUrl    String
+  mimeType      String
+  sizeBytes     Int
+  width         Int?
+  height        Int?
+  altText       String?
+  createdAt     DateTime      @default(now())
+  categories    Category[]    @relation("CategoryImage")
+  productImages ProductImage[]
+
+  @@map("MediaAsset")
+}
+
+// ------------------------- ProductAlternative ------------------------
+
+// Symmetric many-to-many self-relation. Both rows are stored per pair;
+// symmetry is enforced in the Phase 05 service layer. No self-reference is
+// allowed (CHECK constraint added in the migration).
+model ProductAlternative {
+  id                   String  @id @default(cuid())
+  productId            String
+  alternativeProductId String
+  product              Product @relation("ProductAlternatives", fields: [productId], references: [id], onDelete: Cascade)
+  alternativeProduct   Product @relation("AlternativeProducts", fields: [alternativeProductId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, alternativeProductId])
+  @@index([alternativeProductId])
+  // productId <> alternativeProductId is enforced by a CHECK constraint
+  // added in the initial migration (Prisma ORM 7 does not model @@check here).
+  @@map("ProductAlternative")
+}
+
+// ----------------------------- Collection ----------------------------
+
+model Collection {
+  id          String             @id @default(cuid())
+  slug        String             @unique
+  name        String
+  eyebrow     String
+  description String?
+  isVisible   Boolean            @default(true)
+  products    CollectionProduct[]
+
+  @@map("Collection")
+}
+
+// Ordered membership: preserves the current order-sensitive collection lists.
+model CollectionProduct {
+  id           String     @id @default(cuid())
+  collectionId String
+  productId    String
+  position     Int
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  product      Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, productId])
+  @@unique([collectionId, position])
+  @@index([productId])
+  @@map("CollectionProduct")
+}
+
+// -------------------------------- User -------------------------------
+
+// Foundation for Phase 06 authentication. No auth surfaces built here.
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String?
+  passwordHash String
+  // Phase 10: fail-closed default. A user created without an explicit role
+  // must never become an administrator by omission.
+  role         UserRole  @default(CUSTOMER)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
+
+  @@map("User")
+}
+
+// ------------------------------- Session -----------------------------
+
+model Session {
+  id          String    @id @default(cuid())
+  userId      String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  lastSeenAt  DateTime?
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("Session")
+}
+
+// ---------------------------- SiteSetting ----------------------------
+
+// Key/value JSON store for small site-wide content (ticker, strip, hero,
+// footer copy). No CMS in this phase.
+model SiteSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("SiteSetting")
+}
+
+// --------------------------- RateLimitEvent ---------------------------
+
+// Phase 11: durable sliding-window counters for auth abuse protection.
+// One row per attempt; key encodes the scope (e.g. "login:email:<addr>").
+// Lives in Neon (not process memory) so limits hold across serverless
+// instances. Rows outside every window are pruned opportunistically on
+// each check — the table stays tiny by construction.
+model RateLimitEvent {
+  id        String   @id @default(cuid())
+  key       String
+  createdAt DateTime @default(now())
+
+  @@index([key, createdAt])
+  @@map("RateLimitEvent")
+}
