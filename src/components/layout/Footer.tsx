@@ -9,9 +9,8 @@ const companyLinks = [
 ];
 
 const socialLinks = [
-  { label: "Instagram", href: "https://www.instagram.com/" },
-  { label: "Pinterest", href: "https://www.pinterest.com/" },
-  { label: "Are.na", href: "https://www.are.na/" },
+  { label: "Instagram", href: "https://www.instagram.com/hype_decor_eg?utm_source=ig_web_button_share_sheet&stkn=ZDNlZDc0MzIxNw==" },
+  { label: "ABSYCODE", href: "https://absy-portfolio-4yti.vercel.app/" },
 ];
 
 export default async function Footer() {
